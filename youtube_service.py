@@ -1,6 +1,8 @@
 import yt_dlp
 import re
 import logging
+import requests
+import xml.etree.ElementTree as ET
 from urllib.parse import urlparse, parse_qs
 
 def extract_video_id(youtube_url):
@@ -79,15 +81,18 @@ def extract_youtube_transcript(youtube_url):
             
             # If no manual subtitles, try automatic captions
             if not transcript_text:
-                for lang in ['en', 'en-US', 'en-GB']:
+                for lang in ['en', 'en-orig', 'en-US', 'en-GB']:
                     if lang in automatic_captions:
                         caption_info = automatic_captions[lang]
                         if caption_info:
-                            # Find the best format
+                            # Find the best format (prefer vtt, srv3, json3, then others)
                             best_format = None
-                            for fmt in caption_info:
-                                if fmt.get('ext') in ['vtt', 'srv3']:
-                                    best_format = fmt
+                            for preferred_ext in ['vtt', 'srv3', 'json3', 'srt', 'ttml']:
+                                for fmt in caption_info:
+                                    if fmt.get('ext') == preferred_ext:
+                                        best_format = fmt
+                                        break
+                                if best_format:
                                     break
                             
                             if not best_format and caption_info:
@@ -97,9 +102,11 @@ def extract_youtube_transcript(youtube_url):
                                 try:
                                     caption_url = best_format['url']
                                     transcript_text = _download_and_parse_subtitles(caption_url, best_format.get('ext', 'vtt'))
-                                    break
+                                    if transcript_text:  # Only break if we actually got text
+                                        logging.info(f"Successfully extracted automatic captions for language: {lang}")
+                                        break
                                 except Exception as e:
-                                    logging.warning(f"Error downloading automatic captions: {e}")
+                                    logging.warning(f"Error downloading automatic captions for {lang}: {e}")
                                     continue
             
             if not transcript_text:
@@ -117,8 +124,6 @@ def extract_youtube_transcript(youtube_url):
 
 def _download_and_parse_subtitles(url, format_type):
     """Download and parse subtitle file"""
-    import requests
-    import xml.etree.ElementTree as ET
     
     try:
         response = requests.get(url, timeout=30)
@@ -128,8 +133,14 @@ def _download_and_parse_subtitles(url, format_type):
         if format_type == 'srv3' or 'srv3' in url:
             # XML format (srv3)
             return _parse_xml_subtitles(content)
+        elif format_type == 'json3' or 'json3' in url:
+            # JSON3 format
+            return _parse_json3_subtitles(content)
+        elif format_type in ['srt', 'ttml'] or any(fmt in url for fmt in ['srt', 'ttml']):
+            # SRT or TTML format - parse as VTT-like
+            return _parse_vtt_subtitles(content)
         else:
-            # VTT format
+            # VTT format (default)
             return _parse_vtt_subtitles(content)
             
     except Exception as e:
@@ -185,4 +196,30 @@ def _parse_vtt_subtitles(vtt_content):
         
     except Exception as e:
         logging.error(f"Error parsing VTT subtitles: {e}")
+        raise
+
+def _parse_json3_subtitles(json_content):
+    """Parse JSON3 subtitle format from YouTube"""
+    import json
+    
+    try:
+        data = json.loads(json_content)
+        transcript_parts = []
+        
+        # Extract text from events
+        events = data.get('events', [])
+        for event in events:
+            segs = event.get('segs', [])
+            for seg in segs:
+                text = seg.get('utf8', '')
+                if text:
+                    # Clean up the text
+                    text = text.strip()
+                    if text:
+                        transcript_parts.append(text)
+        
+        return ' '.join(transcript_parts)
+        
+    except Exception as e:
+        logging.error(f"Error parsing JSON3 subtitles: {e}")
         raise
