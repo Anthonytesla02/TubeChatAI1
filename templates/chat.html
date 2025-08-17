@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+
+{% block title %}Chat - {{ transcript.video_title }} - YouTube RAG Chatbot{% endblock %}
+
+{% block content %}
+<div class="container-fluid chat-container">
+    <div class="row h-100">
+        <!-- Sidebar -->
+        <div class="col-md-3 chat-sidebar">
+            <div class="sidebar-header p-3">
+                <h6 class="mb-0">
+                    <i class="fas fa-video me-2"></i>Video Info
+                </h6>
+            </div>
+            
+            <div class="video-info p-3">
+                <div class="video-thumbnail mb-3">
+                    <img src="https://img.youtube.com/vi/{{ transcript.video_id }}/maxresdefault.jpg" 
+                         alt="Video thumbnail" 
+                         class="img-fluid rounded"
+                         onerror="this.src='https://img.youtube.com/vi/{{ transcript.video_id }}/hqdefault.jpg'">
+                </div>
+                
+                <h6 class="video-title mb-2">{{ transcript.video_title }}</h6>
+                
+                <div class="video-actions mb-3">
+                    <a href="{{ transcript.youtube_url }}" target="_blank" class="btn btn-outline-primary btn-sm">
+                        <i class="fab fa-youtube me-1"></i>Watch Video
+                    </a>
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary btn-sm">
+                        <i class="fas fa-arrow-left me-1"></i>Back
+                    </a>
+                </div>
+                
+                <div class="session-info">
+                    <small class="text-muted d-block mb-1">
+                        <i class="fas fa-calendar me-1"></i>
+                        Added: {{ transcript.created_at.strftime('%b %d, %Y') }}
+                    </small>
+                    <small class="text-muted d-block">
+                        <i class="fas fa-comments me-1"></i>
+                        Session: {{ chat_session.session_name }}
+                    </small>
+                </div>
+            </div>
+            
+            <!-- Context Display -->
+            <div class="context-display" id="contextDisplay" style="display: none;">
+                <div class="context-header p-2">
+                    <small class="text-muted fw-medium">
+                        <i class="fas fa-brain me-1"></i>Context Used
+                    </small>
+                </div>
+                <div class="context-content p-2" id="contextContent">
+                    <!-- Context chunks will be displayed here -->
+                </div>
+            </div>
+        </div>
+        
+        <!-- Chat Area -->
+        <div class="col-md-9 chat-main">
+            <div class="chat-header p-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-robot me-2"></i>AI Chat Assistant
+                    </h5>
+                    <div class="chat-actions">
+                        <button class="btn btn-outline-secondary btn-sm" onclick="clearChat()">
+                            <i class="fas fa-trash me-1"></i>Clear Chat
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Chat Messages -->
+            <div class="chat-messages" id="chatMessages">
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="message {{ message.message_type }} animate-fade-in">
+                            <div class="message-avatar">
+                                {% if message.message_type == 'user' %}
+                                    <i class="fas fa-user"></i>
+                                {% else %}
+                                    <i class="fas fa-robot"></i>
+                                {% endif %}
+                            </div>
+                            <div class="message-content">
+                                <div class="message-header">
+                                    <strong>
+                                        {% if message.message_type == 'user' %}
+                                            You
+                                        {% else %}
+                                            AI Assistant
+                                        {% endif %}
+                                    </strong>
+                                    <small class="text-muted ms-2">
+                                        {{ message.timestamp.strftime('%I:%M %p') }}
+                                    </small>
+                                    {% if message.message_type == 'assistant' and message.confidence_score %}
+                                        <span class="confidence-badge ms-2">
+                                            {{ message.confidence_score }}% confidence
+                                        </span>
+                                    {% endif %}
+                                </div>
+                                <div class="message-text">
+                                    {{ message.content }}
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="welcome-message text-center">
+                        <div class="welcome-icon mb-3">
+                            <i class="fas fa-comments"></i>
+                        </div>
+                        <h5>Start chatting about the video!</h5>
+                        <p class="text-muted">
+                            Ask any questions about "{{ transcript.video_title }}" and I'll help you find answers from the transcript.
+                        </p>
+                        <div class="suggested-questions">
+                            <h6 class="mb-3">Try asking:</h6>
+                            <div class="suggestion-tags">
+                                <span class="suggestion-tag" onclick="sendSuggestion('What is this video about?')">
+                                    What is this video about?
+                                </span>
+                                <span class="suggestion-tag" onclick="sendSuggestion('What are the main points?')">
+                                    What are the main points?
+                                </span>
+                                <span class="suggestion-tag" onclick="sendSuggestion('Can you summarize the key ideas?')">
+                                    Can you summarize the key ideas?
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+            
+            <!-- Chat Input -->
+            <div class="chat-input-container">
+                <form id="chatForm" class="chat-form">
+                    <div class="input-group">
+                        <input type="text" 
+                               class="form-control" 
+                               id="messageInput" 
+                               placeholder="Ask a question about the video..." 
+                               autocomplete="off"
+                               required>
+                        <button type="submit" class="btn btn-primary" id="sendButton">
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Modal -->
+<div class="modal fade" id="loadingModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center p-4">
+                <div class="spinner-border text-primary mb-3" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mb-0">AI is thinking...</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_head %}
+<script>
+    // Pass session ID to JavaScript
+    window.SESSION_ID = {{ chat_session.id }};
+</script>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+<script>
+function sendSuggestion(text) {
+    document.getElementById('messageInput').value = text;
+    document.getElementById('chatForm').dispatchEvent(new Event('submit'));
+}
+
+function clearChat() {
+    if (confirm('Are you sure you want to clear this chat? This action cannot be undone.')) {
+        // In a real implementation, you'd send a request to clear the chat
+        // For now, we'll just reload the page to start fresh
+        window.location.href = window.location.href.split('?')[0];
+    }
+}
+
+// Auto-scroll to bottom on page load
+document.addEventListener('DOMContentLoaded', function() {
+    const chatMessages = document.getElementById('chatMessages');
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+});
+</script>
+{% endblock %}

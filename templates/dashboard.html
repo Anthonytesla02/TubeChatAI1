@@ -1,0 +1,314 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - YouTube RAG Chatbot{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="h2 fw-bold mb-1">Welcome back, {{ current_user.username }}!</h1>
+                    <p class="text-muted mb-0">Manage your YouTube transcripts and chat sessions</p>
+                </div>
+                <div>
+                    <button class="btn btn-primary btn-lg" data-bs-toggle="modal" data-bs-target="#addTranscriptModal">
+                        <i class="fas fa-plus me-2"></i>Add Video
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="stat-card bg-primary text-white animate-scale-hover">
+                <div class="stat-icon">
+                    <i class="fas fa-video"></i>
+                </div>
+                <div class="stat-content">
+                    <h3 class="mb-1">{{ transcripts|length }}</h3>
+                    <p class="mb-0">Video Transcripts</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="stat-card bg-success text-white animate-scale-hover">
+                <div class="stat-icon">
+                    <i class="fas fa-comments"></i>
+                </div>
+                <div class="stat-content">
+                    <h3 class="mb-1">{{ recent_sessions|length }}</h3>
+                    <p class="mb-0">Chat Sessions</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="stat-card bg-warning text-white animate-scale-hover">
+                <div class="stat-icon">
+                    <i class="fas fa-brain"></i>
+                </div>
+                <div class="stat-content">
+                    <h3 class="mb-1">{{ transcripts|selectattr('embeddings_processed')|list|length }}</h3>
+                    <p class="mb-0">Ready for Chat</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Content Tabs -->
+    <div class="row">
+        <div class="col">
+            <ul class="nav nav-tabs custom-tabs mb-4" id="dashboardTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="transcripts-tab" data-bs-toggle="tab" data-bs-target="#transcripts" type="button" role="tab">
+                        <i class="fas fa-video me-2"></i>My Videos
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="sessions-tab" data-bs-toggle="tab" data-bs-target="#sessions" type="button" role="tab">
+                        <i class="fas fa-comments me-2"></i>Recent Chats
+                    </button>
+                </li>
+            </ul>
+
+            <div class="tab-content" id="dashboardTabsContent">
+                <!-- Transcripts Tab -->
+                <div class="tab-pane fade show active" id="transcripts" role="tabpanel">
+                    {% if transcripts %}
+                        <div class="row">
+                            {% for transcript in transcripts %}
+                                <div class="col-lg-6 col-xl-4 mb-4">
+                                    <div class="transcript-card animate-fade-in">
+                                        <div class="card-header">
+                                            <div class="video-thumbnail">
+                                                <img src="https://img.youtube.com/vi/{{ transcript.video_id }}/maxresdefault.jpg" 
+                                                     alt="Video thumbnail" 
+                                                     onerror="this.src='https://img.youtube.com/vi/{{ transcript.video_id }}/hqdefault.jpg'">
+                                                <div class="play-overlay">
+                                                    <i class="fab fa-youtube"></i>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="card-body">
+                                            <h6 class="card-title text-truncate" title="{{ transcript.video_title }}">
+                                                {{ transcript.video_title }}
+                                            </h6>
+                                            <div class="transcript-meta mb-3">
+                                                <small class="text-muted">
+                                                    <i class="fas fa-calendar me-1"></i>
+                                                    {{ transcript.created_at.strftime('%b %d, %Y') }}
+                                                </small>
+                                                {% if transcript.embeddings_processed %}
+                                                    <span class="badge bg-success ms-2">
+                                                        <i class="fas fa-check me-1"></i>Ready
+                                                    </span>
+                                                {% else %}
+                                                    <span class="badge bg-warning ms-2">
+                                                        <i class="fas fa-clock me-1"></i>Processing
+                                                    </span>
+                                                {% endif %}
+                                            </div>
+                                            <div class="card-actions">
+                                                {% if transcript.embeddings_processed %}
+                                                    <a href="{{ url_for('chat', transcript_id=transcript.id) }}" 
+                                                       class="btn btn-primary btn-sm">
+                                                        <i class="fas fa-comments me-1"></i>Start Chat
+                                                    </a>
+                                                {% else %}
+                                                    <button class="btn btn-secondary btn-sm" disabled>
+                                                        <i class="fas fa-clock me-1"></i>Processing...
+                                                    </button>
+                                                {% endif %}
+                                                <a href="{{ transcript.youtube_url }}" 
+                                                   target="_blank" 
+                                                   class="btn btn-outline-primary btn-sm">
+                                                    <i class="fab fa-youtube me-1"></i>Watch
+                                                </a>
+                                                <button class="btn btn-outline-danger btn-sm" 
+                                                        onclick="confirmDelete('transcript', {{ transcript.id }}, '{{ transcript.video_title[:30] }}...')">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="empty-state text-center">
+                            <div class="empty-icon mb-3">
+                                <i class="fas fa-video"></i>
+                            </div>
+                            <h5 class="mb-3">No videos yet</h5>
+                            <p class="text-muted mb-4">
+                                Add your first YouTube video to start chatting with its content.
+                            </p>
+                            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addTranscriptModal">
+                                <i class="fas fa-plus me-2"></i>Add Your First Video
+                            </button>
+                        </div>
+                    {% endif %}
+                </div>
+
+                <!-- Sessions Tab -->
+                <div class="tab-pane fade" id="sessions" role="tabpanel">
+                    {% if recent_sessions %}
+                        <div class="row">
+                            {% for session in recent_sessions %}
+                                <div class="col-lg-6 mb-4">
+                                    <div class="session-card animate-fade-in">
+                                        <div class="card-body">
+                                            <div class="d-flex justify-content-between align-items-start mb-3">
+                                                <div>
+                                                    <h6 class="card-title mb-1">{{ session.session_name }}</h6>
+                                                    <small class="text-muted">
+                                                        <i class="fas fa-video me-1"></i>
+                                                        {{ session.transcript.video_title[:40] }}...
+                                                    </small>
+                                                </div>
+                                                <div class="session-meta text-end">
+                                                    <small class="text-muted">
+                                                        {{ session.created_at.strftime('%b %d') }}
+                                                    </small>
+                                                    <br>
+                                                    <span class="badge bg-light text-dark">
+                                                        {{ session.messages|length }} messages
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            
+                                            {% if session.messages %}
+                                                <div class="last-message mb-3">
+                                                    <small class="text-muted">Last message:</small>
+                                                    <p class="mb-0 text-truncate">
+                                                        "{{ session.messages[-1].content[:60] }}..."
+                                                    </p>
+                                                </div>
+                                            {% endif %}
+                                            
+                                            <div class="session-actions">
+                                                <a href="{{ url_for('chat', transcript_id=session.transcript_id, session_id=session.id) }}" 
+                                                   class="btn btn-primary btn-sm">
+                                                    <i class="fas fa-comments me-1"></i>Continue Chat
+                                                </a>
+                                                <button class="btn btn-outline-danger btn-sm" 
+                                                        onclick="confirmDelete('session', {{ session.id }}, '{{ session.session_name[:30] }}...')">
+                                                    <i class="fas fa-trash me-1"></i>Delete
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="empty-state text-center">
+                            <div class="empty-icon mb-3">
+                                <i class="fas fa-comments"></i>
+                            </div>
+                            <h5 class="mb-3">No chat sessions yet</h5>
+                            <p class="text-muted mb-4">
+                                Start chatting with your video transcripts to see sessions here.
+                            </p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Transcript Modal -->
+<div class="modal fade" id="addTranscriptModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-plus me-2"></i>Add YouTube Video
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('add_transcript') }}">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="youtube_url" class="form-label fw-medium">
+                            <i class="fab fa-youtube me-1"></i>YouTube URL
+                        </label>
+                        <input type="url" 
+                               class="form-control" 
+                               id="youtube_url" 
+                               name="youtube_url" 
+                               required
+                               placeholder="https://www.youtube.com/watch?v=...">
+                        <div class="form-text">
+                            Paste any YouTube video URL. The video must have subtitles or auto-captions.
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-download me-2"></i>Extract Transcript
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-exclamation-triangle text-danger me-2"></i>Confirm Delete
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="deleteMessage"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form id="deleteForm" method="POST" style="display: inline;">
+                    <button type="submit" class="btn btn-danger">
+                        <i class="fas fa-trash me-2"></i>Delete
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function confirmDelete(type, id, name) {
+    const modal = new bootstrap.Modal(document.getElementById('deleteModal'));
+    const message = document.getElementById('deleteMessage');
+    const form = document.getElementById('deleteForm');
+    
+    if (type === 'transcript') {
+        message.textContent = `Are you sure you want to delete "${name}"? This will also delete all associated chat sessions.`;
+        form.action = `/delete_transcript/${id}`;
+    } else if (type === 'session') {
+        message.textContent = `Are you sure you want to delete the chat session "${name}"?`;
+        form.action = `/delete_session/${id}`;
+    }
+    
+    modal.show();
+}
+
+// Auto-refresh processing status
+setInterval(function() {
+    const processingBadges = document.querySelectorAll('.badge.bg-warning');
+    if (processingBadges.length > 0) {
+        location.reload();
+    }
+}, 30000); // Check every 30 seconds
+</script>
+{% endblock %}
