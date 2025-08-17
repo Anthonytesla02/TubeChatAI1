@@ -474,6 +474,7 @@ dependencies = [
     { name = "psycopg2-binary" },
     { name = "pyjwt" },
     { name = "requests" },
+    { name = "sqlalchemy" },
     { name = "werkzeug" },
     { name = "yt-dlp" },
 ]
@@ -491,6 +492,7 @@ requires-dist = [
     { name = "psycopg2-binary", specifier = ">=2.9.10" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "requests", specifier = ">=2.31.0" },
+    { name = "sqlalchemy", specifier = ">=2.0.43" },
     { name = "werkzeug", specifier = ">=3.0.0" },
     { name = "yt-dlp", specifier = ">=2024.8.6" },
 ]
