@@ -103,11 +103,10 @@ def register():
         
         # Create new user
         try:
-            user = User(
-                username=username,
-                email=email,
-                password_hash=generate_password_hash(password)
-            )
+            user = User()
+            user.username = username
+            user.email = email
+            user.password_hash = generate_password_hash(password)
             db.session.add(user)
             db.session.commit()
             

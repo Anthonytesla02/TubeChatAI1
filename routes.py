@@ -55,13 +55,12 @@ def add_transcript():
             return redirect(url_for('dashboard'))
         
         # Create new transcript
-        transcript = Transcript(
-            user_id=current_user.id,
-            youtube_url=youtube_url,
-            video_title=transcript_data['title'],
-            video_id=transcript_data['video_id'],
-            transcript_text=transcript_data['transcript']
-        )
+        transcript = Transcript()
+        transcript.user_id = current_user.id
+        transcript.youtube_url = youtube_url
+        transcript.video_title = transcript_data['title']
+        transcript.video_id = transcript_data['video_id']
+        transcript.transcript_text = transcript_data['transcript']
         
         db.session.add(transcript)
         db.session.commit()
@@ -105,11 +104,10 @@ def chat(transcript_id):
     
     if not chat_session:
         # Create new session
-        chat_session = ChatSession(
-            user_id=current_user.id,
-            transcript_id=transcript_id,
-            session_name=f"Chat about {transcript.video_title[:50]}..."
-        )
+        chat_session = ChatSession()
+        chat_session.user_id = current_user.id
+        chat_session.transcript_id = transcript_id
+        chat_session.session_name = f"Chat about {transcript.video_title[:50]}..."
         db.session.add(chat_session)
         db.session.commit()
     
@@ -147,11 +145,10 @@ def api_chat():
     
     try:
         # Save user message
-        user_msg = ChatMessage(
-            session_id=session_id,
-            message_type='user',
-            content=user_message
-        )
+        user_msg = ChatMessage()
+        user_msg.session_id = session_id
+        user_msg.message_type = 'user'
+        user_msg.content = user_message
         db.session.add(user_msg)
         db.session.commit()
         
@@ -162,13 +159,12 @@ def api_chat():
         response_data = generate_chat_response(user_message, relevant_chunks)
         
         # Save assistant message
-        assistant_msg = ChatMessage(
-            session_id=session_id,
-            message_type='assistant',
-            content=response_data['response'],
-            context_chunks=json.dumps(response_data['context_chunks']),
-            confidence_score=response_data.get('confidence_score', 0.0)
-        )
+        assistant_msg = ChatMessage()
+        assistant_msg.session_id = session_id
+        assistant_msg.message_type = 'assistant'
+        assistant_msg.content = response_data['response']
+        assistant_msg.context_chunks = json.dumps(response_data['context_chunks'])
+        assistant_msg.confidence_score = response_data.get('confidence_score', 0.0)
         db.session.add(assistant_msg)
         db.session.commit()
         
