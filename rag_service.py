@@ -70,12 +70,12 @@ def process_transcript_for_rag(transcript_id: int):
         chunks = chunk_text(transcript.transcript_text)
         
         # Process each chunk
-        for i, chunk_text in enumerate(chunks):
+        for i, chunk_content in enumerate(chunks):
             try:
                 # Create chunk record (without embeddings for now)
                 chunk = TranscriptChunk(
                     transcript_id=transcript_id,
-                    chunk_text=chunk_text,
+                    chunk_text=chunk_content,
                     chunk_index=i,
                     embedding_vector=None  # Will be added when we configure embeddings
                 )
