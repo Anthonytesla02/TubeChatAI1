@@ -8,8 +8,14 @@ from typing import List, Dict, Tuple
 from collections import Counter
 import math
 
-# Simple text-based similarity for now (will add embeddings later)
-# This provides basic functionality until sentence-transformers is properly configured
+# Import the improved RAG service
+try:
+    from improved_rag_service import improved_rag
+    IMPROVED_RAG_AVAILABLE = True
+    logging.info("Improved RAG service loaded successfully")
+except ImportError as e:
+    logging.warning(f"Improved RAG service not available: {e}")
+    IMPROVED_RAG_AVAILABLE = False
 
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
     """
@@ -56,9 +62,15 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]
 
 def process_transcript_for_rag(transcript_id: int):
     """
-    Process a transcript for RAG: create chunks (simplified text-based version)
+    Process a transcript for RAG: use improved RAG service if available, fallback to basic
     """
     try:
+        if IMPROVED_RAG_AVAILABLE:
+            # Use the improved TF-IDF based service
+            improved_rag.process_transcript_for_rag(transcript_id)
+            return
+        
+        # Fallback to basic processing
         transcript = Transcript.query.get(transcript_id)
         if not transcript:
             raise ValueError(f"Transcript {transcript_id} not found")
@@ -68,18 +80,20 @@ def process_transcript_for_rag(transcript_id: int):
         
         # Chunk the transcript
         chunks = chunk_text(transcript.transcript_text)
+        logging.info(f"Created {len(chunks)} text chunks for transcript {transcript_id}")
         
-        # Process each chunk
+        # Create chunk records
+        chunk_objects = []
         for i, chunk_content in enumerate(chunks):
             try:
-                # Create chunk record (without embeddings for now)
                 chunk = TranscriptChunk()
                 chunk.transcript_id = transcript_id
                 chunk.chunk_text = chunk_content
                 chunk.chunk_index = i
-                chunk.embedding_vector = None  # Will be added when we configure embeddings
+                chunk.embedding_vector = None
                 
                 db.session.add(chunk)
+                chunk_objects.append(chunk)
                 
                 # Commit every 10 chunks to avoid memory issues
                 if i % 10 == 0:
@@ -90,7 +104,12 @@ def process_transcript_for_rag(transcript_id: int):
                 continue
         
         db.session.commit()
-        logging.info(f"Successfully processed {len(chunks)} chunks for transcript {transcript_id}")
+        
+        # Update transcript status
+        transcript.embeddings_processed = True
+        db.session.commit()
+        
+        logging.info(f"Successfully processed transcript {transcript_id} for RAG")
         
     except Exception as e:
         db.session.rollback()
@@ -118,11 +137,24 @@ def calculate_text_similarity(query: str, text: str) -> float:
 
 def search_similar_chunks(transcript_id: int, query: str, top_k: int = 5) -> List[Dict]:
     """
-    Search for similar chunks using simple text similarity
+    Search for similar chunks using improved TF-IDF similarity (with basic text fallback)
     Returns list of dictionaries with chunk text and similarity scores
     """
     try:
-        # Get all chunks for this transcript
+        # Try improved TF-IDF search first if available
+        if IMPROVED_RAG_AVAILABLE:
+            try:
+                results = improved_rag.search_similar_chunks_tfidf(transcript_id, query, top_k)
+                if results:
+                    logging.debug(f"TF-IDF search returned {len(results)} chunks with similarities: {[r['similarity'] for r in results[:3]]}")
+                    return results
+                else:
+                    logging.warning(f"TF-IDF search returned no results for transcript {transcript_id}, falling back to basic text similarity")
+            except Exception as e:
+                logging.error(f"TF-IDF search failed: {e}, falling back to basic text similarity")
+        
+        # Fallback to basic text-based similarity
+        logging.info(f"Using basic text similarity search for transcript {transcript_id}")
         chunks = TranscriptChunk.query.filter_by(transcript_id=transcript_id).all()
         
         if not chunks:
@@ -142,7 +174,8 @@ def search_similar_chunks(transcript_id: int, query: str, top_k: int = 5) -> Lis
                     'chunk_index': chunk.chunk_index,
                     'similarity': float(similarity),
                     'start_time': chunk.start_time,
-                    'end_time': chunk.end_time
+                    'end_time': chunk.end_time,
+                    'chunk_id': chunk.id
                 })
                 
             except Exception as e:
@@ -152,9 +185,10 @@ def search_similar_chunks(transcript_id: int, query: str, top_k: int = 5) -> Lis
         # Sort by similarity and return top_k
         similarities.sort(key=lambda x: x['similarity'], reverse=True)
         
-        # Filter out chunks with very low similarity (< 0.1)
+        # Filter out chunks with very low similarity
         relevant_chunks = [chunk for chunk in similarities if chunk['similarity'] > 0.1]
         
+        logging.debug(f"Basic text search returned {len(relevant_chunks)} chunks with similarities: {[r['similarity'] for r in relevant_chunks[:3]]}")
         return relevant_chunks[:top_k]
         
     except Exception as e:
@@ -166,6 +200,11 @@ def get_context_for_query(transcript_id: int, query: str, max_context_length: in
     Get relevant context for a query, combining multiple chunks if needed
     """
     try:
+        # Use improved RAG service if available for better context formatting
+        if IMPROVED_RAG_AVAILABLE:
+            return improved_rag.get_context_for_query(transcript_id, query, max_context_length)
+        
+        # Fallback to basic context building
         similar_chunks = search_similar_chunks(transcript_id, query, top_k=5)
         
         if not similar_chunks:

@@ -68,9 +68,7 @@ def add_transcript():
         # Process for RAG in background (in a real app, use Celery)
         try:
             process_transcript_for_rag(transcript.id)
-            transcript.embeddings_processed = True
-            db.session.commit()
-            flash(f'Successfully added transcript for "{transcript_data["title"]}"', 'success')
+            flash(f'Successfully added transcript for "{transcript_data["title"]}" with improved search capabilities', 'success')
         except Exception as e:
             logging.error(f"Error processing embeddings: {e}")
             flash(f'Transcript added but embeddings processing failed: {str(e)}', 'warning')
@@ -152,10 +150,16 @@ def api_chat():
         db.session.add(user_msg)
         db.session.commit()
         
-        # Search for relevant chunks
-        relevant_chunks = search_similar_chunks(chat_session.transcript_id, user_message)
+        # Search for relevant chunks with improved similarity
+        relevant_chunks = search_similar_chunks(chat_session.transcript_id, user_message, top_k=5)
         
-        # Generate response using Mistral AI
+        # Log search results for debugging
+        logging.info(f"Found {len(relevant_chunks)} relevant chunks for query: {user_message[:50]}")
+        if relevant_chunks:
+            top_similarities = [chunk.get('similarity', 0) for chunk in relevant_chunks[:3]]
+            logging.info(f"Top 3 similarity scores: {top_similarities}")
+        
+        # Generate response using Mistral AI with enhanced context
         response_data = generate_chat_response(user_message, relevant_chunks)
         
         # Save assistant message
@@ -194,6 +198,46 @@ def delete_transcript(transcript_id):
         flash('Error deleting transcript', 'error')
     
     return redirect(url_for('dashboard'))
+
+@app.route('/debug/chunks/<int:transcript_id>')
+@login_required
+def debug_chunks(transcript_id):
+    """Debug endpoint to show chunks and search results"""
+    try:
+        # Verify transcript belongs to user
+        transcript = Transcript.query.filter_by(id=transcript_id, user_id=current_user.id).first_or_404()
+        
+        # Get basic chunk info
+        chunks = TranscriptChunk.query.filter_by(transcript_id=transcript_id).all()
+        chunk_info = []
+        for chunk in chunks:
+            chunk_info.append({
+                'id': chunk.id,
+                'index': chunk.chunk_index,
+                'text_length': len(chunk.chunk_text),
+                'text_preview': chunk.chunk_text[:100] + "..." if len(chunk.chunk_text) > 100 else chunk.chunk_text,
+                'has_embedding': chunk.embedding_vector is not None
+            })
+        
+        # Test search if query provided
+        test_results = []
+        query = request.args.get('q', '')
+        if query:
+            test_results = search_similar_chunks(transcript_id, query, top_k=5)
+        
+        return jsonify({
+            'transcript_title': transcript.video_title,
+            'total_chunks': len(chunks),
+            'chunks_with_embeddings': sum(1 for c in chunks if c.embedding_vector is not None),
+            'embedding_processed': transcript.embeddings_processed,
+            'chunks': chunk_info,
+            'test_query': query,
+            'search_results': test_results
+        })
+        
+    except Exception as e:
+        logging.error(f"Error in debug endpoint: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/delete_session/<int:session_id>', methods=['POST'])
 @login_required

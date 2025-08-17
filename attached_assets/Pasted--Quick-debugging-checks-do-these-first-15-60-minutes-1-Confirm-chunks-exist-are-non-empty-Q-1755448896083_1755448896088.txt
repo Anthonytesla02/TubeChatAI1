@@ -1,0 +1,254 @@
+
+Quick debugging checks (do these first — 15–60 minutes)
+
+1. Confirm chunks exist & are non-empty
+
+Query TranscriptChunk rows for the transcript used in the failing chat and log chunk_index, len(chunk_text).
+
+If there are 0 chunks or all are tiny, the chunker was not run or chunking parameters are wrong. (Docs show chunking logic that should create chunks — verify it actually ran).
+
+
+
+2. Log the retrieval pipeline end-to-end
+
+For one failing query, log:
+
+returned similar_chunks list and raw similarity scores,
+
+assembled context string passed to Mistral,
+
+final API payload (system prompt + messages).
+
+
+This will reveal whether similarity scores are near zero or whether context was truncated away before the API call.
+
+
+
+3. Check embeddings_processed logic
+
+Your pipeline marks embeddings_processed = True after process_transcript_for_rag but currently embeddings are None. Ensure that flag doesn't mean "chunks created" only — rename to rag_processed or set it only once embeddings/indexing exist to avoid false positives.
+
+
+
+4. Temporary: expose top-k chunks in UI
+
+Add a debug button to show top 5 chunks + similarity so you can inspect what the system thinks is relevant.
+
+
+
+
+
+---
+
+Immediate fixes (best ROI, hours → 1 day)
+
+A. Replace Jaccard with semantic embeddings + cosine similarity
+
+Jaccard on word sets is brittle (stopwords, synonyms, paraphrases). Use vector embeddings and cosine similarity.
+
+Suggested stack options (pick one):
+
+Local/cheap: sentence-transformers (all-MiniLM-L6-v2) -> FAISS (local)
+
+Managed: OpenAI/Palm embeddings + pgvector in PostgreSQL, or Pinecone/Weaviate.
+
+
+Minimal code example (embedding generation + cosine similarity using sentence-transformers + FAISS):
+
+# generate embeddings
+from sentence_transformers import SentenceTransformer
+import numpy as np
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+chunks = [c.chunk_text for c in chunks_from_db]
+embs = model.encode(chunks, convert_to_numpy=True, show_progress_bar=False)  # shape (n, d)
+
+# build / persist FAISS index (once per transcript or global)
+import faiss
+d = embs.shape[1]
+index = faiss.IndexFlatIP(d)  # use inner product for cosine if vectors normalized
+faiss.normalize_L2(embs)
+index.add(embs)
+
+# query
+q_emb = model.encode([query], convert_to_numpy=True)
+faiss.normalize_L2(q_emb)
+_, I = index.search(q_emb, top_k)
+# I are indices of top chunks
+
+If you prefer PG + pgvector, change TranscriptChunk.embedding_vector to vector type and create an index. That integrates cleanly with your SQLAlchemy/Postgres setup.
+
+B. Store embeddings properly (not LargeBinary)
+
+Your model currently has embedding_vector = db.Column(db.LargeBinary). Options:
+
+Use pgvector extension and store as vector (recommended for Postgres).
+
+If you must use LargeBinary, store np.float32.tobytes() and keep dimension metadata — but pgvector is far easier and faster.
+
+
+C. Compute query embedding on each chat and use vector search
+
+At /send_message, convert query → embedding and run vector search (FAISS / pgvector / Pinecone).
+
+Fetch top_k chunks and pass them to get_context_for_query.
+
+
+
+---
+
+Mid-term enhancements (1–3 days)
+
+1. Improve chunking & metadata
+
+Keep transcripts split by speaker/time when available (VTT timestamps). Include start_time/end_time in chunk metadata — helps give precise answers and build timestamped citations.
+
+Tune chunk_size to the model context window (for Mistral or future LLMs): e.g., 500–800 tokens per chunk, overlap 100–200 tokens.
+
+Keep chunks natural by sentence boundary detection (you already do this — good), but add speaker tags if possible.
+
+
+2. Hybrid retrieval: lexical + semantic
+
+Keep a fast TF-IDF (or ElasticSearch BM25) index as a fallback for exact-word queries and a vector index for semantics.
+
+Combine scores: final_score = alpha * cosine + (1-alpha) * bm25_score. This handles proper nouns and numbers better.
+
+
+3. Reranking with cross-encoder
+
+After initial top-k from vector DB, rerank candidates with a cross-encoder (a model that scores query+chunk pairs, e.g., cross-encoder/ms-marco-MiniLM-L-6-v2) before forming context. This improves precision significantly.
+
+
+4. MMR (Maximal Marginal Relevance) to avoid redundancy
+
+Use MMR to select diverse high-relevance chunks (especially important for long transcripts). This avoids returning 5 near-duplicate chunks.
+
+
+5. Better prompt engineering & provenance
+
+When building the system prompt, include short citations: e.g., SOURCE: [chunk_index, start_time-end_time] before each chunk. Ask the assistant to explicitly quote which chunks it used when making factual claims.
+
+If confidence is low, have the assistant say: “I couldn’t find that in the transcript; here’s what I do find…” rather than hallucinating.
+
+
+
+---
+
+Long-term / scalable (days → weeks)
+
+1. Use a vector DB (Pinecone / Weaviate / Milvus / pgvector + Postgres)
+
+For many transcripts and users, FAISS in-memory is fine for dev. For production, a managed vector DB with metadata filtering scales better. Index metadata: transcript_id, speaker, timestamp, chunk_index, token_count.
+
+
+2. Batch embedding generation + async processing
+
+Use Celery/RQ to compute embeddings and update the vector index in background (you already mention Celery in docs — hook it up). This avoids blocking UI and guarantees embeddings_processed true only when indexing is done.
+
+
+3. Answer extraction (optional)
+
+After the LLM answer, run an extractive QA step (span extraction) from the best chunk(s) to produce a short quote and exact timestamp, improving trustworthiness.
+
+
+4. Monitoring & metrics
+
+Track retrieval metrics: precision@1, precision@5, average similarity of returned chunks, and end-to-end human-labeled accuracy on a small test set. Log these to Grafana/Prometheus or simple CSV dashboards.
+
+
+
+---
+
+Concrete code changes (copy-n-paste friendly)
+
+Replace calculate_text_similarity (Jaccard) with cosine on embeddings
+
+import numpy as np
+from numpy.linalg import norm
+
+def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    if np.all(a == 0) or np.all(b == 0):
+        return 0.0
+    return float(np.dot(a, b) / (norm(a) * norm(b)))
+
+# Example: load embeddings from db (assume stored as np.float32 bytes or pgvector)
+def calculate_similarity_query_to_chunk(query_emb, chunk_emb):
+    return cosine_similarity(query_emb, chunk_emb)
+
+Example search_similar_chunks outline with pgvector (Postgres)
+
+-- SQL (requires pgvector)
+CREATE INDEX ON transcript_chunks USING ivfflat (embedding_vector vector_cosine_ops) WITH (lists = 100);
+
+# SQLAlchemy + pgvector query (pseudo)
+from sqlalchemy import text
+sql = text("""
+SELECT id, chunk_text, start_time, end_time,
+       1 - (embedding_vector <#> :q_emb) AS similarity  -- if using cosine distance operator
+FROM transcript_chunks
+WHERE transcript_id = :tid
+ORDER BY embedding_vector <#> :q_emb
+LIMIT :k
+""")
+# Bind q_emb as a list of floats (pgvector)
+
+
+---
+
+Short checklist for your /send_message endpoint (practical)
+
+1. Generate query embedding.
+
+
+2. Retrieve top N candidates from vector index (N=20).
+
+
+3. (Optional) Re-rank with cross-encoder, keep top K (K=5).
+
+
+4. Apply MMR for diversity if needed.
+
+
+5. Build context string including chunk citations and timestamps.
+
+
+6. Log context length and context content before sending to LLM.
+
+
+7. If context is empty → avoid calling LLM with empty context; reply “No transcript info found” (better UX).
+
+
+8. Save response + used chunk metadata (store array of chunk ids in context_chunks as JSON, not a truncated string).
+
+
+
+
+---
+
+How to verify the fix (tests)
+
+Manual: pick 10 representative queries (who/what/when/how/quotes) and record if the assistant cites transcript and provides correct answers.
+
+Automated: for each query, assert that at least one returned chunk’s text contains answer keywords; measure similarity > 0.5 for top-1.
+
+Logging: produce top_k debug output for failed queries for rapid diagnosis.
+
+
+
+---
+
+Prioritized action plan (what to implement in what order)
+
+1. (Now) Add logs + UI debug to expose returned chunks, similarity scores, and the exact prompt you send to Mistral. Fix any triage issues (0 chunks, wrong flags).
+
+
+2. (Same day) Replace Jaccard similarity with embedding-based cosine similarity (sentence-transformers) + FAISS or pgvector. Update DB storage for embeddings.
+
+
+3. (Next day) Add cross-encoder reranker or MMR to reduce false positives. 4. (Week) Move to managed vector DB + background embedding with Celery. 5. (Ongoing) Add provenance in assistant responses and monitoring.
+
+
+
+
+---

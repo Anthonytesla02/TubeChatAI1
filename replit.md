@@ -30,10 +30,12 @@ Preferred communication style: Simple, everyday language.
 - **ChatSession/ChatMessage Models**: Manages conversation history and context
 
 ### RAG (Retrieval Augmented Generation) System
-- **Sentence Transformers**: Uses 'all-MiniLM-L6-v2' model for text embeddings
-- **Text Chunking**: Splits transcripts into overlapping segments for better context preservation
-- **Vector Similarity Search**: Finds relevant transcript chunks based on user queries
-- **Binary Embedding Storage**: Embeddings stored as binary data in database for efficient retrieval
+- **Improved TF-IDF Search**: Uses scikit-learn TfidfVectorizer with ngrams and stopword removal for better text similarity
+- **Text Chunking**: Splits transcripts into overlapping segments with sentence boundary detection
+- **Cosine Similarity Search**: Uses TF-IDF vectors and cosine similarity for relevant chunk retrieval
+- **Enhanced Context Building**: Includes chunk citations, relevance scores, and timestamps in responses
+- **Fallback System**: Graceful degradation from embeddings to TF-IDF to basic text similarity
+- **Debug Capabilities**: Built-in debugging endpoints to inspect chunks and search results
 
 ### YouTube Integration
 - **yt-dlp**: Extracts video metadata and subtitles/transcripts from YouTube URLs
